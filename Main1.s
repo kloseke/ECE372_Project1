@@ -33,28 +33,53 @@ _start:
 	
 @Setting up UART interrupt
 	LDR R1, =0x48200000			@Base address for INTC
-	MOV R2, #0x2				@Value to reset INTC
+	MOV R2, #0x02				@Value to reset INTC
 	STR R2, [R1, #0x10]			@Write to INTC Config Register
 	MOV R2, #0x00004000			@Unmask UART5
 	STR R2, [R1, #0xB4]			@Write to INTC_MIR_CLEAR1 register
-	MOV R2, #0x4				@Unmask INTC INT 98, GPIOINTA
+	MOV R2, #0x04				@Unmask INTC INT 98, GPIOINTA
 	STR R2, [R1, #0xE8]			@Write to INTC_MIR_CLEAR3 register
 	
 @Set mode for MUX  ***
 	LDR R1, =0x44E10000			@Base for control module
-	MOV R2, #0x4				@Mode 4
+	MOV R2, #0x04				@Mode 4
 	STR R2, [R1, #0x8C0]		@TxD
 	STR R2, [R1, #0x8C4]		@RxD
-	MOV R2, #0x6				@Mode 6
+	MOV R2, #0x06				@Mode 6
 	STR R2, [R1, #0x8D8]		@CTSN
 	STR R2, [R1, #0x8DC]		@RTSN
 	
 @Turn on UART5 CLK
-	MOV R2, #0x2				@Enable UART5 CLK
+	MOV R2, #0x02				@Enable UART5 CLK
 	LDR R1, =0x44E00038			@Address of CM_PER_UART5_CLKCTRL
 	STR R2, [R1]				@Turn on UART5
 	
-@
+@Setting the Baud rate
+	LDR R1, =0x481AA000			@UART base address
+	MOV R2, #0x83				@Conf mode A set
+	STR R2, [R1, #0x0C]			@Setting to Conf mode A
+	
+	MOV R2, #0x00				@DLH bits
+	STR R2, [R1, #0x04]			@Setting DLH
+	
+	MOV R2, #0x4E				@DLL bits
+	STR R2, [R1, #0x00]			@Setting DLL
+	
+@MDR1 setting to 16x
+	MOV R2, #0x00				@16x mode bits
+	STR R2, [R1, #0x20]			@Setting to 16x mode in MDR1
+	
+@Setting back to OP mode
+	MOV R2, #0x03				@Op mode bits
+	STR R2, [R1, #0x0C]			@Setting to OP mode in LCR
+	
+@Setting up interrupts on UART end
+	MOV R2, #0x0A				@Set bits 1 and 3 for THR and Modem status
+	STR R2, [R1, #0x04]			@Setting interrupts in UART
+	
+@Disabling FIFO (If breaks it, move above DLH DLL set) ***
+	MOV R2, #0x06				@Bits to disable FIFO
+	STR R2, [R1, #0x08]			@Disabling FIFO
 
 @Processor IRQ enabled in CPSR
 	MRS R3, CPSR				@Copy CPSR to R3
@@ -62,34 +87,10 @@ _start:
 	MSR CPSR_c, R3				@Write back to CPSR
 	LDR R0, =0x00000000			@Sets state for IRQ purposes to 0
 
-@Keep off if holding but don't keep turning off if not
-HOLDOFF:
-	LDR R5, =0x01E00000			@Mask to turn all LEDs off
-	LDR R3, =0x4804C190			@Address of clear data
-	STR R5, [R3]				@Set all LEDs to OFF (logic 0)	
-	
-@Turning first bits on
-SWITCHER:
-	LDR R5, =0x01E00000			@Mask to turn all LEDs off
-	LDR R3, =0x4804C190			@Address of clear data
-	LDR R6, =0x4804C194			@Address of set data out
-	STR R5, [R3]				@Set all LEDs to OFF (logic 0)
-	TST R0, #0x1				@Test first bit
-	BNE SWITCHING				@State 1, go to switching lights
-	BEQ HOLDOFF				@State 0, go to hold
-	
-SWITCHING:
-@	STR R5, [R3]				@Set all LEDs to OFF (logic 0)
-	TST R0, #0x2				@Test second bit
-	BNE NEXTSET					@State 1, go to second set of lights
-	BEQ FIRSTSET				@State 0, go to first set of lights
-FIRSTSET:
-	STR R7, [R6]				@Turn on LEDs 0 and 3
-	B SWITCHER					@Loop until inetrrupt
-
-NEXTSET:
-	STR R8, [R6]				@Turn on LEDs 1 and 2
-	B SWITCHER					@Loop until interrupt
+@Empty loop to wait for the interrupt from the button
+WAITBUTTON:
+	NOP							@Wait for button
+	b WAITBUTTON
 	
 INT_DIRECTOR:
 	STMFD SP!, {R3-R8, LR}		@Push main registers to stack
@@ -190,7 +191,7 @@ HOLDLOOP:
 SYS_IRQ:   .WORD 0				@Location to store systems IRQ address
 .data
 .align 2
-MESSAGE:	.byte 0x0D
+MESSAGE:	.byte 0x0D			@Test message for part 1
 .ascii "Testing"
 .byte 0x0D
 .align 2
